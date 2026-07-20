@@ -53,7 +53,8 @@ event-management-system/
 │   │   └── services/           # Business logic & caching layer
 │   ├── main.py                 # Application entry point
 │   ├── Dockerfile              # Multi-stage production build
-│   └── requirements.txt        # Python dependencies
+│   ├── requirements.txt        # Python dependencies
+│   └── .env.example            # Environment variables template
 │
 └── terraform/                  # AWS Infrastructure as Code
     ├── main.tf, variables.tf   # Provider & variables
