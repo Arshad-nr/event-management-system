@@ -40,6 +40,29 @@ To prevent race conditions where multiple students try to register for the last 
 
 ---
 
+## 📂 Project Structure
+
+```
+event-management-system/
+├── src/                        # FastAPI Application Code
+│   ├── app/
+│   │   ├── api/v1/endpoints/   # REST endpoints (auth, events)
+│   │   ├── core/               # App config, database setup, JWT security
+│   │   ├── models/             # SQLAlchemy ORM models
+│   │   ├── schemas/            # Pydantic validation schemas
+│   │   └── services/           # Business logic & caching layer
+│   ├── main.py                 # Application entry point
+│   ├── Dockerfile              # Multi-stage production build
+│   └── requirements.txt        # Python dependencies
+│
+└── terraform/                  # AWS Infrastructure as Code
+    ├── main.tf, variables.tf   # Provider & variables
+    ├── vpc.tf, ecr.tf, alb.tf  # Networking, Load Balancer, Registry
+    └── ecs.tf, rds.tf, elasticache.tf # Fargate, Postgres, Redis configs
+```
+
+---
+
 ## 🔌 API Documentation
 
 The complete interactive API documentation (Swagger UI) is automatically generated and available at `/docs` on the live URL.
