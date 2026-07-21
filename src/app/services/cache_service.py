@@ -28,3 +28,18 @@ async def invalidate_events_cache(redis) -> None:
             await redis.delete(*keys)
     except Exception as e:
         logger.error(f"Redis invalidate error: {e}")
+
+async def acquire_lock(redis, lock_key: str, ttl: int = 10) -> bool:
+    try:
+        # returns True if set, False if already exists
+        return await redis.set(lock_key, "1", nx=True, ex=ttl)
+    except Exception as e:
+        logger.error(f"Redis lock acquire error: {e}")
+        return False
+
+async def release_lock(redis, lock_key: str) -> None:
+    try:
+        await redis.delete(lock_key)
+    except Exception as e:
+        logger.error(f"Redis lock release error: {e}")
+

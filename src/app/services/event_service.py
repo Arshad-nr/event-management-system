@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -5,8 +6,7 @@ from sqlalchemy import func
 from app.models import Event, EventRegistration, Student
 from app.schemas.event import EventCreateRequest, EventUpdateRequest
 from app.services.exceptions import EventNotFoundException, EventFullException, AlreadyRegisteredException
-from app.services.cache_service import get_cached_events, set_cached_events, invalidate_events_cache, EVENTS_CACHE_PREFIX
-
+from app.services.cache_service import get_cached_events, set_cached_events, invalidate_events_cache, EVENTS_CACHE_PREFIX, acquire_lock, release_lock
 async def create_event(db: AsyncSession, data: EventCreateRequest) -> Event:
     new_event = Event(**data.model_dump())
     db.add(new_event)
@@ -16,39 +16,61 @@ async def create_event(db: AsyncSession, data: EventCreateRequest) -> Event:
 
 async def get_events_paginated(db: AsyncSession, redis, limit: int, offset: int) -> dict:
     cache_key = f"{EVENTS_CACHE_PREFIX}{limit}:{offset}"
+    lock_key = f"lock:{cache_key}"
+    
     cached_data = await get_cached_events(redis, cache_key)
     if cached_data:
         return cached_data
 
-    result = await db.execute(select(Event).limit(limit).offset(offset))
-    events = result.scalars().all()
+    # Cache miss. Try to acquire the Redis lock.
+    acquired = await acquire_lock(redis, lock_key, ttl=10)
+    
+    if not acquired:
+        # Someone else holds the lock. Wait and poll the cache.
+        for _ in range(10): # wait up to 1 second
+            await asyncio.sleep(0.1)
+            cached_data = await get_cached_events(redis, cache_key)
+            if cached_data:
+                return cached_data
 
-    count_result = await db.execute(select(func.count(Event.id)))
-    total = count_result.scalar_one()
+    try:
+        # Double check cache inside lock (in case populated while waiting)
+        cached_data = await get_cached_events(redis, cache_key)
+        if cached_data:
+            return cached_data
 
-    # Convert events to dict for JSON serialization
-    events_data = [
-        {
-            "id": str(e.id),
-            "title": e.title,
-            "description": e.description,
-            "date": e.date.isoformat() if e.date else None,
-            "location": e.location,
-            "max_capacity": e.max_capacity,
-            "current_registered": e.current_registered,
+        result = await db.execute(select(Event).limit(limit).offset(offset))
+        events = result.scalars().all()
+
+        count_result = await db.execute(select(func.count(Event.id)))
+        total = count_result.scalar_one()
+
+        # Convert events to dict for JSON serialization
+        events_data = [
+            {
+                "id": str(e.id),
+                "title": e.title,
+                "description": e.description,
+                "date": e.date.isoformat() if e.date else None,
+                "location": e.location,
+                "max_capacity": e.max_capacity,
+                "current_registered": e.current_registered,
+            }
+            for e in events
+        ]
+
+        response_data = {
+            "data": events_data,
+            "limit": limit,
+            "offset": offset,
+            "total": total
         }
-        for e in events
-    ]
 
-    response_data = {
-        "data": events_data,
-        "limit": limit,
-        "offset": offset,
-        "total": total
-    }
-
-    await set_cached_events(redis, cache_key, response_data)
-    return response_data
+        await set_cached_events(redis, cache_key, response_data)
+        return response_data
+    finally:
+        if acquired:
+            await release_lock(redis, lock_key)
 
 async def get_event_by_id(db: AsyncSession, event_id: UUID) -> Event:
     result = await db.execute(select(Event).where(Event.id == event_id))
